@@ -18,7 +18,7 @@ STAT_FIELDS = {
     "haste":       ("Haste",       "HasteBonus"),
     "crit":        ("Crit",        "CritBonus"),
     "mastery":     ("Mastery",     "MasteryBonus"),
-    "versatility": ("Versatility", "VersatilityBonus"),
+    "versatility": ("Versatility", "VersatilityATK"),  # VersatilityBonus = raw rating; ATK = % bonus
     "avoidance":   ("Avoidance",   "AvoidanceBonus"),
     "leech":       ("Leech",       "LeechValue"),
     "speed":       ("Speed",       "SpeedBonus"),
