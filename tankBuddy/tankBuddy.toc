@@ -1,0 +1,9 @@
+## Interface: 120001
+## Title: tankBuddy
+## Notes: Blood DK tank gear evaluator — stat weights from murlok.io
+## Version: 1.0.0
+## Author: Ultron
+
+Config.lua
+Core.lua
+UI.lua
