@@ -2,6 +2,36 @@ local TB = _G["tankBuddy"]
 
 local frame
 local linePool = {}
+local debugFrame
+
+function TB.ShowDebugBox(text)
+    if not debugFrame then
+        debugFrame = CreateFrame("Frame", "tankBuddyDebugFrame", UIParent, "BasicFrameTemplateWithInset")
+        debugFrame:SetSize(600, 400)
+        debugFrame:SetPoint("CENTER")
+        debugFrame:SetMovable(true)
+        debugFrame:EnableMouse(true)
+        debugFrame:RegisterForDrag("LeftButton")
+        debugFrame:SetScript("OnDragStart", debugFrame.StartMoving)
+        debugFrame:SetScript("OnDragStop", debugFrame.StopMovingOrSizing)
+
+        debugFrame.titleText = debugFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        debugFrame.titleText:SetPoint("CENTER", debugFrame.TitleBg, "CENTER")
+        debugFrame.titleText:SetText("tankBuddy Debug — selecciona todo y copia")
+
+        debugFrame.editBox = CreateFrame("EditBox", nil, debugFrame)
+        debugFrame.editBox:SetMultiLine(true)
+        debugFrame.editBox:SetFontObject(GameFontNormalSmall)
+        debugFrame.editBox:SetWidth(570)
+        debugFrame.editBox:SetAutoFocus(true)
+        debugFrame.editBox:SetPoint("TOPLEFT",     debugFrame, "TOPLEFT",     10, -32)
+        debugFrame.editBox:SetPoint("BOTTOMRIGHT", debugFrame, "BOTTOMRIGHT", -10,  10)
+        debugFrame.editBox:SetScript("OnEscapePressed", function() debugFrame:Hide() end)
+    end
+    debugFrame.editBox:SetText(text)
+    debugFrame.editBox:HighlightText()
+    debugFrame:Show()
+end
 
 local function GetLine(parent)
     for _, fs in ipairs(linePool) do
@@ -46,6 +76,16 @@ local function BuildFrame()
     local content = CreateFrame("Frame", nil, scroll)
     content:SetWidth(520)
     content:SetHeight(1)
+    content:EnableMouse(true)
+    content:SetHyperlinksEnabled(true)
+    content:SetScript("OnHyperlinkEnter", function(self, linkData, link)
+        GameTooltip:SetOwner(UIParent, "ANCHOR_CURSOR")
+        GameTooltip:SetHyperlink(link)
+        GameTooltip:Show()
+    end)
+    content:SetScript("OnHyperlinkLeave", function()
+        GameTooltip:Hide()
+    end)
     scroll:SetScrollChild(content)
     frame.content = content
 end
@@ -68,6 +108,53 @@ local function RenderLines(lines)
     frame.content:SetHeight(math.abs(y) + 8)
 end
 
+function TB.RefreshVault()
+    if not frame then BuildFrame() end
+
+    local lines = {}
+    local function add(text, color)
+        table.insert(lines, { text = text, color = color })
+    end
+
+    add("Cámara de Tesoros — evaluación Blood DK", {1, 0.84, 0})
+    add("")
+
+    local results, err = TB.EvaluateVault()
+    if err then
+        add(err, {1, 0.4, 0.4})
+    elseif not results or #results == 0 then
+        add("No hay items disponibles para evaluar.", {0.6, 0.6, 0.6})
+    else
+        add(string.format("%d recompensa(s) disponible(s):", #results), {1, 1, 0})
+        add("")
+        for i, r in ipairs(results) do
+            local scoreStr = r.score > 0 and string.format("%.1f", r.score) or "sin stats"
+            local diffStr, diffColor = "", {0.7, 0.7, 0.7}
+            if r.diff then
+                if r.diff > 0 then
+                    diffStr  = string.format("  |cff00ff00+%.1f vs equipado|r", r.diff)
+                    diffColor = {0.2, 1, 0.4}
+                elseif r.diff < 0 then
+                    diffStr  = string.format("  |cffff4444%.1f vs equipado|r", r.diff)
+                    diffColor = {1, 0.4, 0.4}
+                else
+                    diffStr = "  igual al equipado"
+                end
+            end
+            local fallbackNote = r.fallback and " |cffff8800(ilvl aprox)|r" or ""
+            add(string.format("%d. [%s] %s  ilvl %d%s  score %s%s",
+                i, r.actType, r.itemLink, r.ilvl, fallbackNote, scoreStr, diffStr), diffColor)
+            if r.equippedLink then
+                add(string.format("   Equipado: %s  ilvl %d", r.equippedLink, r.equippedIlvl or 0), {0.5, 0.5, 0.5})
+            end
+            add("")
+        end
+    end
+
+    RenderLines(lines)
+    frame:Show()
+end
+
 function TB.Refresh()
     if not frame then BuildFrame() end
 
@@ -87,16 +174,38 @@ function TB.Refresh()
     add(string.format("Config: %s  |  %d chars  |  %s", cfg.UpdatedAt, cfg.CharacterCount, cfg.Spec), {0.5, 0.5, 0.5})
     add("")
 
-    -- Upgrades
-    local upgrades = TB.FindUpgrades()
-    if #upgrades == 0 then
-        add("No hay upgrades en tus bolsas.", {0.2, 1, 0.2})
+    -- Comparación de bolsas
+    local results = TB.FindUpgrades()
+    if #results == 0 then
+        add("No hay gear equipable en tus bolsas.", {0.5, 0.5, 0.5})
     else
-        add(string.format("%d upgrade(s) encontrado(s):", #upgrades), {1, 1, 0})
+        local nUp = 0
+        for _, u in ipairs(results) do if u.diff > 0 then nUp = nUp + 1 end end
+        add(string.format("Gear en bolsas (%d items, %d mejoras):", #results, nUp), {1, 1, 0})
         add("")
-        for i, u in ipairs(upgrades) do
-            add(string.format("%d. %s  ilvl %d  +%.1f", i, u.link, u.ilvl, u.diff), {0.2, 1, 0.4})
-            add(string.format("   vs %s  (%.1f → %.1f)", u.equippedLink, u.equippedScore, u.score), {0.5, 0.5, 0.5})
+        for i, u in ipairs(results) do
+            local diffStr, itemColor
+            if u.diff > 0 then
+                diffStr   = string.format("+%.1f", u.diff)
+                itemColor = {0.2, 1, 0.4}
+            elseif u.diff < 0 then
+                diffStr   = string.format("%.1f", u.diff)
+                itemColor = {1, 0.3, 0.3}
+            else
+                diffStr   = "±0"
+                itemColor = {0.6, 0.6, 0.6}
+            end
+            local stepStr = u.curStep and u.maxStep
+                and string.format(" [%d/%d]", u.curStep, u.maxStep) or ""
+            add(string.format("%d. %s  ilvl %d%s  %s", i, u.link, u.ilvl, stepStr, diffStr), itemColor)
+            add(string.format("   vs %s  ilvl %d  (%.1f → %.1f)", u.equippedLink, u.equippedIlvl, u.equippedScore, u.score), {0.5, 0.5, 0.5})
+
+            -- Proyección al mismo ilvl que el equipado
+            if u.projDiff then
+                local projColor = u.projDiff > 0 and {0.2, 1, 0.4} or {1, 0.3, 0.3}
+                local projSign  = u.projDiff > 0 and "+" or ""
+                add(string.format("   A ilvl %d (mismo que equipado): %s%.1f", u.equippedIlvl, projSign, u.projDiff), projColor)
+            end
             add("")
         end
     end
@@ -126,11 +235,17 @@ SlashCmdList["TANKBUDDY"] = function(msg)
         TB.PrintUpgrades()
     elseif cmd == "gear" then
         TB.PrintEquipped()
+    elseif cmd == "vault" or cmd == "camara" then
+        TB.RefreshVault()
+    elseif cmd == "debug" then
+        TB.Debug()
     elseif cmd == "help" then
         print("|cff4fc3f7[tankBuddy]|r Comandos:")
-        print("  /tb          — abrir/cerrar ventana")
+        print("  /tb          — abrir/cerrar ventana (bolsas)")
+        print("  /tb vault    — evaluar Cámara de Tesoros")
         print("  /tb scan     — upgrades en chat")
         print("  /tb gear     — gear equipado en chat")
+        print("  /tb debug    — diagnóstico")
         print("  /tb help     — esta ayuda")
     else
         TB.Refresh()
